@@ -142,16 +142,28 @@ app.post('/github/authorize-url', (req, res) => {
   }
   
   const signedState = createSignedState(return_url);
+  const callbackUrl = `${req.protocol}://${req.get('host')}/github/callback`;
+  
+  console.log('=== GitHub OAuth Debug ===');
+  console.log('Callback URL being sent to GitHub:', callbackUrl);
+  console.log('Return URL from request:', return_url);
+  console.log('Request protocol:', req.protocol);
+  console.log('Request host:', req.get('host'));
+  console.log('=========================');
   
   const authUrl = new URL('https://github.com/login/oauth/authorize');
   authUrl.searchParams.set('client_id', GITHUB_CLIENT_ID);
-  authUrl.searchParams.set('redirect_uri', `${req.protocol}://${req.get('host')}/github/callback`);
+  authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('state', signedState);
   authUrl.searchParams.set('scope', scope || 'user:email');
   
   res.json({ 
     authorize_url: authUrl.toString(),
-    state: signedState
+    state: signedState,
+    debug: {
+      callback_url: callbackUrl,
+      return_url: return_url
+    }
   });
 });
 
@@ -177,6 +189,76 @@ app.post('/create-state', (req, res) => {
   res.json({ state: signedState });
 });
 
+app.get('/github/test', (req, res) => {
+  const returnUrl = req.query.return_url || APP_REDIRECT_FALLBACK;
+  
+  const signedState = createSignedState(returnUrl);
+  const callbackUrl = `${req.protocol}://${req.get('host')}/github/callback`;
+  
+  const authUrl = new URL('https://github.com/login/oauth/authorize');
+  authUrl.searchParams.set('client_id', GITHUB_CLIENT_ID);
+  authUrl.searchParams.set('redirect_uri', callbackUrl);
+  authUrl.searchParams.set('state', signedState);
+  authUrl.searchParams.set('scope', 'user:email');
+  
+  console.log('=== GitHub OAuth Test Debug ===');
+  console.log('Callback URL:', callbackUrl);
+  console.log('Return URL:', returnUrl);
+  console.log('Full Auth URL:', authUrl.toString());
+  console.log('===============================');
+  
+  res.send(`
+    <html>
+      <head><title>GitHub OAuth Test</title></head>
+      <body style="font-family: sans-serif; max-width: 800px; margin: 50px auto; padding: 20px;">
+        <h1>GitHub OAuth Test Page</h1>
+        <p>This is a test endpoint that doesn't require authentication.</p>
+        
+        <h2>Configuration:</h2>
+        <ul>
+          <li><strong>Callback URL:</strong> <code>${callbackUrl}</code></li>
+          <li><strong>Return URL:</strong> <code>${returnUrl}</code></li>
+          <li><strong>GitHub Client ID:</strong> <code>${GITHUB_CLIENT_ID}</code></li>
+        </ul>
+        
+        <h2>⚠️ Important:</h2>
+        <p>Make sure the callback URL above is registered in your GitHub OAuth App settings!</p>
+        <p>Go to: GitHub → Settings → Developer settings → OAuth Apps → Your App</p>
+        <p>Set the <strong>Authorization callback URL</strong> to: <code>${callbackUrl}</code></p>
+        
+        <div style="margin: 30px 0;">
+          <a href="${authUrl.toString()}" 
+             style="display: inline-block; background: #24292e; color: white; padding: 12px 24px; 
+                    text-decoration: none; border-radius: 6px; font-weight: bold;">
+            🚀 Test GitHub OAuth Flow
+          </a>
+        </div>
+        
+        <h2>Debug Information:</h2>
+        <pre style="background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto;">${JSON.stringify({
+          callback_url: callbackUrl,
+          return_url: returnUrl,
+          client_id: GITHUB_CLIENT_ID,
+          protocol: req.protocol,
+          host: req.get('host'),
+          full_auth_url: authUrl.toString()
+        }, null, 2)}</pre>
+        
+        <h2>How to Use:</h2>
+        <ol>
+          <li>Click the button above to start the OAuth flow</li>
+          <li>GitHub will ask you to authorize the app</li>
+          <li>After authorization, you'll be redirected back with a token</li>
+          <li>The token will be appended to the return URL as a query parameter</li>
+        </ol>
+        
+        <h2>Custom Return URL:</h2>
+        <p>Add <code>?return_url=YOUR_URL</code> to this page URL to test with a custom return URL.</p>
+        <p>Example: <code>/github/test?return_url=http://localhost:3000/success</code></p>
+      </body>
+    </html>
+  `);
+});
 
 app.get('/health', (req, res) => {
   res.json({ 
@@ -199,6 +281,7 @@ app.get('/', (req, res) => {
           <li><code>GET /github/callback</code> - GitHub OAuth callback handler (requires signed state)</li>
           <li><code>POST /github/authorize-url</code> - Get full GitHub authorization URL (requires Bearer token auth, server-side only!)</li>
           <li><code>POST /create-state</code> - Create signed state (legacy endpoint, requires Bearer token auth)</li>
+          <li><code>GET /github/test</code> - Test GitHub OAuth flow without authentication (for debugging)</li>
           <li><code>GET /health</code> - Health check endpoint</li>
         </ul>
         <h2>Configuration:</h2>
@@ -222,6 +305,8 @@ app.get('/', (req, res) => {
           <li><code>OAUTH_REDIRECT_BASE</code> - URL of this service</li>
           <li><code>OAUTH_SERVICE_TOKEN</code> - Same token configured here</li>
         </ul>
+        <h2>Quick Test:</h2>
+        <p><a href="/github/test" style="color: #0366d6;">Go to test page →</a></p>
       </body>
     </html>
   `);
