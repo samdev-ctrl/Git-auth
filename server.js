@@ -130,7 +130,6 @@ app.get('/github/callback', async (req, res) => {
 
     console.log(`Redirecting to: ${url.toString()}`);
     res.redirect(url.toString());
-
   } catch (error) {
     console.error('Error during OAuth callback:', error);
     res.status(500).send('Internal server error during OAuth callback');
@@ -233,11 +232,55 @@ app.get('/github/test', (req, res) => {
       <body style="font-family: sans-serif; max-width: 800px; margin: 50px auto; padding: 20px;">
         <h1>GitHub OAuth Test Page</h1>
         <p>This is a test endpoint that doesn't require authentication.</p>
-        <h2>Callback URL:</h2>
-        <code>${callbackUrl}</code>
-        <h2>Return URL:</h2>
-        <code>${returnUrl}</code>
-        <p><a href="${authUrl.toString()}">🚀 Test GitHub OAuth Flow</a></p>
+        
+        <h2>GitHub Permissions Requested:</h2>
+        <ul>
+          <li><strong>repo</strong> - Full control of private repositories (read/write, create branches)</li>
+          <li><strong>workflow</strong> - Update GitHub Action workflows (create and trigger workflows)</li>
+        </ul>
+        
+        <h2>Configuration:</h2>
+        <ul>
+          <li><strong>Callback URL:</strong> <code>${callbackUrl}</code></li>
+          <li><strong>Return URL:</strong> <code>${returnUrl}</code></li>
+          <li><strong>GitHub Client ID:</strong> <code>${GITHUB_CLIENT_ID}</code></li>
+          <li><strong>Scopes:</strong> <code>repo workflow</code></li>
+        </ul>
+        
+        <h2>⚠️ Important:</h2>
+        <p>Make sure the callback URL above is registered in your GitHub OAuth App settings!</p>
+        <p>Go to: GitHub → Settings → Developer settings → OAuth Apps → Your App</p>
+        <p>Set the <strong>Authorization callback URL</strong> to: <code>${callbackUrl}</code></p>
+        
+        <div style="margin: 30px 0;">
+          <a href="${authUrl.toString()}" 
+             style="display: inline-block; background: #24292e; color: white; padding: 12px 24px; 
+                    text-decoration: none; border-radius: 6px; font-weight: bold;">
+            🚀 Test GitHub OAuth Flow
+          </a>
+        </div>
+        
+        <h2>Debug Information:</h2>
+        <pre style="background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto;">${JSON.stringify({
+          callback_url: callbackUrl,
+          return_url: returnUrl,
+          client_id: GITHUB_CLIENT_ID,
+          protocol: req.protocol,
+          host: req.get('host'),
+          full_auth_url: authUrl.toString()
+        }, null, 2)}</pre>
+        
+        <h2>How to Use:</h2>
+        <ol>
+          <li>Click the button above to start the OAuth flow</li>
+          <li>GitHub will ask you to authorize the app</li>
+          <li>After authorization, you'll be redirected back with a token</li>
+          <li>The token will be appended to the return URL as a query parameter</li>
+        </ol>
+        
+        <h2>Custom Return URL:</h2>
+        <p>Add <code>?return_url=YOUR_URL</code> to this page URL to test with a custom return URL.</p>
+        <p>Example: <code>/github/test?return_url=http://localhost:3000/success</code></p>
       </body>
     </html>
   `);
@@ -256,12 +299,45 @@ app.get('/', (req, res) => {
   res.send(`
     <html>
       <head><title>OAuth Redirect Service</title></head>
-      <body>
+      <body style="font-family: sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
         <h1>GitHub OAuth Redirect Service</h1>
+        <p>This service handles GitHub OAuth callbacks and redirects users back to their original environment.</p>
+        
+        <h2>Available Endpoints:</h2>
         <ul>
-          <li><a href="/github/test">Test OAuth Flow</a></li>
-          <li><a href="/health">Health Check</a></li>
+          <li><code>GET /github/callback</code> - GitHub OAuth callback handler (requires signed state)</li>
+          <li><code>POST /github/authorize-url</code> - Get full GitHub authorization URL (requires Bearer token auth, server-side only!)</li>
+          <li><code>POST /create-state</code> - Create signed state (legacy endpoint, requires Bearer token auth)</li>
+          <li><code>GET /github/test</code> - Test GitHub OAuth flow without authentication (for debugging)</li>
+          <li><code>GET /health</code> - Health check endpoint</li>
         </ul>
+        
+        <h2>Configuration:</h2>
+        <ul>
+          <li>GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID ? '✓ Set' : '✗ Missing'}</li>
+          <li>GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET ? '✓ Set' : '✗ Missing'}</li>
+          <li>OAUTH_SERVICE_TOKEN: ${OAUTH_SERVICE_TOKEN ? '✓ Set' : '✗ Missing'}</li>
+        </ul>
+        
+        <h2>Security Features:</h2>
+        <ul>
+          <li>✓ Single-token architecture (OAUTH_SERVICE_TOKEN for auth + state signing)</li>
+          <li>✓ Token-based authentication (no domain allowlists)</li>
+          <li>✓ HMAC-signed state parameter validation</li>
+          <li>✓ State expiration (10 minutes)</li>
+          <li>✓ CSRF protection via cryptographic state</li>
+          <li>✓ Works on any hosting platform</li>
+        </ul>
+        
+        <h2>Simplified Architecture:</h2>
+        <p>Your main app only needs 2 environment variables:</p>
+        <ul>
+          <li><code>OAUTH_REDIRECT_BASE</code> - URL of this service</li>
+          <li><code>OAUTH_SERVICE_TOKEN</code> - Same token configured here</li>
+        </ul>
+        
+        <h2>Quick Test:</h2>
+        <p><a href="/github/test" style="color: #0366d6;">Go to test page →</a></p>
       </body>
     </html>
   `);
