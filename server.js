@@ -4,6 +4,9 @@ import crypto from 'crypto';
 const app = express();
 app.use(express.json());
 
+// Trust proxy - important for getting correct protocol on Render, Heroku, etc.
+app.set('trust proxy', true);
+
 const PORT = process.env.PORT || 3000;
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID;
@@ -38,7 +41,16 @@ function createSignedState(returnUrl) {
   return Buffer.from(JSON.stringify({ payload, signature })).toString('base64url');
 }
 
-function verifySignedState(signedState) {
+function getCallbackUrl(req) {
+  // For production hosting (Render, Heroku, etc.), force HTTPS
+  const protocol = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('host');
+  
+  // If deployed (not localhost), force https
+  const finalProtocol = host.includes('localhost') ? protocol : 'https';
+  
+  return `${finalProtocol}://${host}/github/callback`;
+}
   try {
     const decoded = JSON.parse(Buffer.from(signedState, 'base64url').toString());
     const { payload, signature } = decoded;
@@ -123,6 +135,33 @@ app.get('/github/callback', async (req, res) => {
   }
 });
 
+function verifySignedState(signedState) {
+  try {
+    const decoded = JSON.parse(Buffer.from(signedState, 'base64url').toString());
+    const { payload, signature } = decoded;
+    
+    const expectedSignature = crypto
+      .createHmac('sha256', OAUTH_SERVICE_TOKEN)
+      .update(payload)
+      .digest('hex');
+    
+    if (signature !== expectedSignature) {
+      return { valid: false, error: 'Invalid signature' };
+    }
+    
+    const data = JSON.parse(payload);
+    const age = Date.now() - data.timestamp;
+    
+    if (age > 10 * 60 * 1000) {
+      return { valid: false, error: 'State expired (>10 minutes)' };
+    }
+    
+    return { valid: true, url: data.url };
+  } catch (error) {
+    return { valid: false, error: 'Invalid state format' };
+  }
+}
+
 app.post('/github/authorize-url', (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -142,11 +181,12 @@ app.post('/github/authorize-url', (req, res) => {
   }
   
   const signedState = createSignedState(return_url);
-  const callbackUrl = `${req.protocol}://${req.get('host')}/github/callback`;
+  const callbackUrl = getCallbackUrl(req);
   
   console.log('=== GitHub OAuth Debug ===');
   console.log('Callback URL being sent to GitHub:', callbackUrl);
   console.log('Return URL from request:', return_url);
+  console.log('X-Forwarded-Proto:', req.get('x-forwarded-proto'));
   console.log('Request protocol:', req.protocol);
   console.log('Request host:', req.get('host'));
   console.log('=========================');
@@ -155,14 +195,15 @@ app.post('/github/authorize-url', (req, res) => {
   authUrl.searchParams.set('client_id', GITHUB_CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('state', signedState);
-  authUrl.searchParams.set('scope', scope || 'user:email');
+  authUrl.searchParams.set('scope', scope || 'repo workflow');
   
   res.json({ 
     authorize_url: authUrl.toString(),
     state: signedState,
     debug: {
       callback_url: callbackUrl,
-      return_url: return_url
+      return_url: return_url,
+      scope: scope || 'repo workflow'
     }
   });
 });
@@ -193,17 +234,21 @@ app.get('/github/test', (req, res) => {
   const returnUrl = req.query.return_url || APP_REDIRECT_FALLBACK;
   
   const signedState = createSignedState(returnUrl);
-  const callbackUrl = `${req.protocol}://${req.get('host')}/github/callback`;
+  const callbackUrl = getCallbackUrl(req);
   
   const authUrl = new URL('https://github.com/login/oauth/authorize');
   authUrl.searchParams.set('client_id', GITHUB_CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', callbackUrl);
   authUrl.searchParams.set('state', signedState);
-  authUrl.searchParams.set('scope', 'user:email');
+  authUrl.searchParams.set('scope', 'repo workflow');
   
   console.log('=== GitHub OAuth Test Debug ===');
   console.log('Callback URL:', callbackUrl);
   console.log('Return URL:', returnUrl);
+  console.log('Scope:', 'repo workflow');
+  console.log('X-Forwarded-Proto:', req.get('x-forwarded-proto'));
+  console.log('Protocol:', req.protocol);
+  console.log('Host:', req.get('host'));
   console.log('Full Auth URL:', authUrl.toString());
   console.log('===============================');
   
@@ -214,11 +259,24 @@ app.get('/github/test', (req, res) => {
         <h1>GitHub OAuth Test Page</h1>
         <p>This is a test endpoint that doesn't require authentication.</p>
         
+        <h2>GitHub Permissions Requested:</h2>
+        <ul>
+          <li><strong>repo</strong> - Full control of private repositories (read/write, create branches)</li>
+          <li><strong>workflow</strong> - Update GitHub Action workflows (create and trigger workflows)</li>
+        </ul>
+        
         <h2>Configuration:</h2>
         <ul>
           <li><strong>Callback URL:</strong> <code>${callbackUrl}</code></li>
           <li><strong>Return URL:</strong> <code>${returnUrl}</code></li>
           <li><strong>GitHub Client ID:</strong> <code>${GITHUB_CLIENT_ID}</code></li>
+          <li><strong>Scopes:</strong> <code>repo workflow</code></li>
+        </ul>
+        
+        <h2>Permissions Requested:</h2>
+        <ul>
+          <li>✓ <strong>repo</strong> - Full repository access (read/write, create branches)</li>
+          <li>✓ <strong>workflow</strong> - Create and trigger GitHub Actions workflows</li>
         </ul>
         
         <h2>⚠️ Important:</h2>
